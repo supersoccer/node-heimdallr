@@ -128,32 +128,36 @@ class Heimdallr {
       Config.Heimdallr.callback = `${protocol}://${headers.host}${Config.Heimdallr.callbackPath}`
     }
 
-    request.post({
-      url: Config.Heimdallr.token,
-      json: {
-        app_key: Config.Heimdallr.key,
-        app_secret: Config.Heimdallr.secret,
-        grant_type: 'authorization_code',
-        redirect_uri: res.locals.Utils.Url.build(Config.Heimdallr.callback),
-        code: req.query.code
-      },
-      headers: {
-        connection: 'Close'
-      }
-    }, (err, _res, body) => {
-      console.log('Log err', err)
-      console.log('Log body', body)
+    Heimdallr.requestToken(req, res)
+      .then(access_token => {
+        request.post({
+          url: `${Config.Heimdallr.authHost}${Config.Heimdallr.extendTokenURL}`,
+          json: {
+            app_key: Config.Heimdallr.key,
+            app_secret: Config.Heimdallr.secret,
+            access_token: access_token,
+            expires_in: 432000
+          },
+          headers: {
+            connection: 'Close'
+          }
+        }, (err, _res, body) => {
+          if (!err && _res.statusCode === 200) {
+            res.cookie(Heimdallr.cookieName(res), body.access_token)
+            res.locals.accessToken = body.access_token
 
-      if (!err && _res.statusCode === 200) {
-        res.cookie(Heimdallr.cookieName(res), body.access_token)
-        // Continue to identity middleware
-        res.locals.accessToken = body.access_token
-        next()
-      } else {
+            next()
+          } else {
+            res.status(403)
+            res.send('[74004] Access forbidden.')
+          }
+        })
+      })
+      .catch(err => {
+        console.log('err', err)
         res.status(403)
         res.send('[74004] Access forbidden.')
-      }
-    })
+      })
   }
 
   static identity (req, res, next) {
@@ -399,6 +403,30 @@ class Heimdallr {
     }
 
     return cookieName
+  }
+
+  static requestToken (req, res) {
+    return new Promise((resolve, reject) => {
+      request.post({
+        url: Config.Heimdallr.token,
+        json: {
+          app_key: Config.Heimdallr.key,
+          app_secret: Config.Heimdallr.secret,
+          grant_type: 'authorization_code',
+          redirect_uri: res.locals.Utils.Url.build(Config.Heimdallr.callback),
+          code: req.query.code
+        },
+        headers: {
+          connection: 'Close'
+        }
+      }, (err, _res, body) => {
+        if (!err && _res.statusCode === 200) {
+          resolve(body.access_token)
+        } else {
+          reject(err)
+        }
+      })
+    })
   }
 }
 
